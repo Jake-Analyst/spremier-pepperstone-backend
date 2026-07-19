@@ -1,0 +1,14 @@
+{
+  "name": "spremier-pepperstone-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ctrader-open-api": "^2.8.10",
+    "express": "^4.19.2",
+    "cors": "^2.8.5"
+  }
+}
