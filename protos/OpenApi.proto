@@ -1,0 +1,79 @@
+syntax = "proto3";
+package OpenApi;
+
+message ProtoPayload {
+  int32 payloadType = 1;
+  bytes payload = 2;
+  string clientMsgId = 3;
+}
+
+message ProtoOATrader {
+  optional int64 balance = 1;
+  optional int64 equity = 2;
+  optional int64 margin = 3;
+  optional int64 leverageInCents = 8;
+}
+message ProtoOaTraderRes {
+  optional ProtoOATrader trader = 1;
+}
+message ProtoOaTraderReq {
+  int64 ctidTraderAccountId = 1;
+}
+
+message ProtoOaApplicationAuthReq {
+  string clientId = 1;
+  string clientSecret = 2;
+}
+message ProtoOaApplicationAuthRes {}
+
+message ProtoOaAccountAuthReq {
+  int64 ctidTraderAccountId = 1;
+  string accessToken = 2;
+}
+message ProtoOaAccountAuthRes {}
+
+message ProtoOANewOrderReq {
+  int64 ctidTraderAccountId = 1;
+  string symbolName = 2;
+  int32 orderType = 3;
+  int32 tradeSide = 4;
+  int64 volume = 5;
+  string comment = 6;
+}
+message ProtoOANewOrderRes {
+  message ProtoOAOrder {
+    optional int64 orderId = 1;
+  }
+  optional ProtoOAOrder order = 1;
+}
+
+message ProtoOAReconcileReq {
+  int64 ctidTraderAccountId = 1;
+}
+message ProtoOAReconcileRes {
+  message ProtoOAPosition {
+    optional int64 positionId = 1;
+    optional string symbolName = 2;
+    optional int64 volume = 3;
+    optional int32 tradeSide = 4;
+    optional int64 price = 5;
+  }
+  repeated ProtoOAPosition position = 1;
+}
+
+message ProtoOaClosePositionReq {
+  int64 ctidTraderAccountId = 1;
+  int64 positionId = 2;
+  int64 volume = 3;
+}
+message ProtoOaClosePositionRes {}
+
+message ProtoOaErrorRes {
+  optional string description = 1;
+  optional int32 errorCode = 2;
+  optional int64 ctidTraderAccountId = 3;
+}
+
+service OpenApi {
+  rpc Rpc (stream ProtoPayload) returns (stream ProtoPayload);
+}
