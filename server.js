@@ -7,20 +7,29 @@ const crypto = require("crypto");
 const CLIENT_ID = "33520_ta8lqEnYAPCkVmAOMMlc4AXU5HUFTXVgotW5A7m6UYvmwfwnM2";
 const CLIENT_SECRET = "5gKR4Wo3jCZ9k3leEraRgfJNQ8RhXSdxC13kLxgjgcbv7y71QE";
 
-// Load Protobufs
 const packageDefinition = protoLoader.loadSync(
-  ["protos/OpenApi.proto", "protos/OpenApiModel.proto", "protos/OpenApiMessages.proto"],
-  { keepCase: true, longs: String, enums: String, defaults: true, oneofs: true, includeDirs: ["protos"] }
+  ["protos/OpenApi.proto"],
+  { keepCase: true, longs: String, enums: String, defaults: true, oneofs: true }
 );
 const proto = grpc.loadPackageDefinition(packageDefinition).OpenApi;
+
+// cTrader API Payload Type IDs
+const payloadTypes = {
+  "ProtoOaApplicationAuthReq": 2101,
+  "ProtoOaAccountAuthReq": 2103,
+  "ProtoOaTraderReq": 2113,
+  "ProtoOANewOrderReq": 2121,
+  "ProtoOaReconcileReq": 2125,
+  "ProtoOaClosePositionReq": 2127,
+  "ProtoOaErrorRes": 2147
+};
 
 const responseTypes = {
   "ProtoOaApplicationAuthReq": "ProtoOaApplicationAuthRes",
   "ProtoOaAccountAuthReq": "ProtoOaAccountAuthRes",
   "ProtoOaTraderReq": "ProtoOaTraderRes",
-  "ProtoOaAccountListReq": "ProtoOaAccountListRes",
   "ProtoOANewOrderReq": "ProtoOANewOrderRes",
-  "ProtoOaReconcileReq": "ProtoOaReconcileRes",
+  "ProtoOaReconcileReq": "ProtoOAReconcileRes",
   "ProtoOaClosePositionReq": "ProtoOaClosePositionRes"
 };
 
@@ -47,12 +56,18 @@ async function getSession(accessToken, accountId) {
     const clientMsgId = protoPayload.clientMsgId;
     if (clientMsgId && session.pendingRequests[clientMsgId]) {
       const req = session.pendingRequests[clientMsgId];
-      const responseType = responseTypes[req.payloadType];
-      if (responseType && proto[responseType]) {
-        const actualMsg = proto[responseType].decode(protoPayload.payload);
-        req.resolve(actualMsg);
+      
+      if (protoPayload.payloadType === payloadTypes["ProtoOaErrorRes"]) {
+        const error = proto.ProtoOaErrorRes.decode(protoPayload.payload);
+        req.reject(new Error(error.description || "Unknown cTrader API Error"));
       } else {
-        req.resolve(protoPayload.payload);
+        const responseType = responseTypes[req.payloadType];
+        if (responseType && proto[responseType]) {
+          const actualMsg = proto[responseType].decode(protoPayload.payload);
+          req.resolve(actualMsg);
+        } else {
+          req.resolve(protoPayload.payload);
+        }
       }
       delete session.pendingRequests[clientMsgId];
     }
@@ -76,7 +91,11 @@ async function getSession(accessToken, accountId) {
       const innerMsgInstance = MsgType.create(msg);
       const innerMsgBuffer = MsgType.encode(innerMsgInstance).finish();
       
-      session.call.write({ payload: innerMsgBuffer, clientMsgId });
+      session.call.write({
+        payloadType: payloadTypes[payloadType],
+        payload: innerMsgBuffer,
+        clientMsgId: clientMsgId
+      });
     });
   };
 
