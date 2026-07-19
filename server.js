@@ -4,6 +4,7 @@ const grpc = require("@grpc/grpc-js");
 const protoLoader = require("@grpc/proto-loader");
 const protobuf = require("protobufjs");
 const crypto = require("crypto");
+const fs = require("fs");
 
 const CLIENT_ID = "33520_ta8lqEnYAPCkVmAOMMlc4AXU5HUFTXVgotW5A7m6UYvmwfwnM2";
 const CLIENT_SECRET = "5gKR4Wo3jCZ9k3leEraRgfJNQ8RhXSdxC13kLxgjgcbv7y71QE";
@@ -64,7 +65,19 @@ async function getSession(accessToken, accountId) {
 
   const isLive = String(accountId).startsWith("1373");
   const host = isLive ? "openapi.ctrader.com:5034" : "openapi.ctrader.com:5035";
-  const client = new proto.OpenApi(host, grpc.credentials.createSsl());
+  
+  // Read Linux system root certificates to fix TLS timeout issues on Render
+  let rootCerts = null;
+  try {
+    rootCerts = fs.readFileSync("/etc/ssl/certs/ca-certificates.crt");
+  } catch (e) {
+    console.warn("Could not read system root certs, using defaults.");
+  }
+  
+  const sslCreds = grpc.credentials.createSsl(rootCerts);
+  const client = new proto.OpenApi(host, sslCreds, {
+    "grpc.ssl_target_name_override": "openapi.ctrader.com"
+  });
   
   const session = { client, call: null, pendingRequests: {}, ready: false, sendMessage: null };
   sessions.set(key, session);
