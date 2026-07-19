@@ -2,18 +2,37 @@ const express = require("express");
 const cors = require("cors");
 const grpc = require("@grpc/grpc-js");
 const protoLoader = require("@grpc/proto-loader");
+const protobuf = require("protobufjs");
 const crypto = require("crypto");
 
 const CLIENT_ID = "33520_ta8lqEnYAPCkVmAOMMlc4AXU5HUFTXVgotW5A7m6UYvmwfwnM2";
 const CLIENT_SECRET = "5gKR4Wo3jCZ9k3leEraRgfJNQ8RhXSdxC13kLxgjgcbv7y71QE";
 
+// Load protos for gRPC client
 const packageDefinition = protoLoader.loadSync(
   ["protos/OpenApi.proto"],
   { keepCase: true, longs: String, enums: String, defaults: true, oneofs: true }
 );
 const proto = grpc.loadPackageDefinition(packageDefinition).OpenApi;
 
-// cTrader API Payload Type IDs
+// Load protos for serialization
+const root = protobuf.loadSync("protos/OpenApi.proto");
+const messages = {
+  ProtoOaApplicationAuthReq: root.lookupType("OpenApi.ProtoOaApplicationAuthReq"),
+  ProtoOaApplicationAuthRes: root.lookupType("OpenApi.ProtoOaApplicationAuthRes"),
+  ProtoOaAccountAuthReq: root.lookupType("OpenApi.ProtoOaAccountAuthReq"),
+  ProtoOaAccountAuthRes: root.lookupType("OpenApi.ProtoOaAccountAuthRes"),
+  ProtoOaTraderReq: root.lookupType("OpenApi.ProtoOaTraderReq"),
+  ProtoOaTraderRes: root.lookupType("OpenApi.ProtoOaTraderRes"),
+  ProtoOANewOrderReq: root.lookupType("OpenApi.ProtoOANewOrderReq"),
+  ProtoOANewOrderRes: root.lookupType("OpenApi.ProtoOANewOrderRes"),
+  ProtoOAReconcileReq: root.lookupType("OpenApi.ProtoOAReconcileReq"),
+  ProtoOAReconcileRes: root.lookupType("OpenApi.ProtoOAReconcileRes"),
+  ProtoOaClosePositionReq: root.lookupType("OpenApi.ProtoOaClosePositionReq"),
+  ProtoOaClosePositionRes: root.lookupType("OpenApi.ProtoOaClosePositionRes"),
+  ProtoOaErrorRes: root.lookupType("OpenApi.ProtoOaErrorRes")
+};
+
 const payloadTypes = {
   "ProtoOaApplicationAuthReq": 2101,
   "ProtoOaAccountAuthReq": 2103,
@@ -58,15 +77,15 @@ async function getSession(accessToken, accountId) {
       const req = session.pendingRequests[clientMsgId];
       
       if (protoPayload.payloadType === payloadTypes["ProtoOaErrorRes"]) {
-        const error = proto.ProtoOaErrorRes.decode(protoPayload.payload);
+        const error = messages["ProtoOaErrorRes"].decode(protoPayload.payload);
         req.reject(new Error(error.description || "Unknown cTrader API Error"));
       } else {
         const responseType = responseTypes[req.payloadType];
-        if (responseType && proto[responseType]) {
-          const actualMsg = proto[responseType].decode(protoPayload.payload);
+        if (responseType && messages[responseType]) {
+          const actualMsg = messages[responseType].decode(protoPayload.payload);
           req.resolve(actualMsg);
         } else {
-          req.resolve(protoPayload.payload);
+          req.resolve({ success: true });
         }
       }
       delete session.pendingRequests[clientMsgId];
@@ -85,7 +104,7 @@ async function getSession(accessToken, accountId) {
       const clientMsgId = crypto.randomUUID();
       session.pendingRequests[clientMsgId] = { resolve, reject, payloadType };
       
-      const MsgType = proto[payloadType];
+      const MsgType = messages[payloadType];
       if (!MsgType) return reject("Invalid message type: " + payloadType);
       
       const innerMsgInstance = MsgType.create(msg);
@@ -93,7 +112,7 @@ async function getSession(accessToken, accountId) {
       
       session.call.write({
         payloadType: payloadTypes[payloadType],
-        payload: innerMsgBuffer,
+        payload: Buffer.from(innerMsgBuffer),
         clientMsgId: clientMsgId
       });
     });
@@ -126,7 +145,7 @@ app.get("/account-detail", async (req, res) => {
     res.json({
       data: {
         balance, equity, margin, freeMargin,
-        currency: "USD",
+        currency: t.currency || "USD",
         loginId: String(accountId),
         accountType: String(accountId).startsWith("1373") ? "live" : "demo",
         leverage: Number(t.leverageInCents || 10000) / 100
@@ -135,72 +154,6 @@ app.get("/account-detail", async (req, res) => {
   } catch (e) {
     console.error("account-detail error:", e.message || e);
     res.status(500).json({ error: e.message || String(e) });
-  }
-});
-
-app.post("/test-trade", async (req, res) => {
-  const { token, accountId = "5313320", symbol = "EURUSD", side = "BUY", volume = 0.01 } = req.body;
-  if (!token) return res.status(401).json({ error: "Missing token" });
-
-  try {
-    const session = await getSession(token, accountId);
-    const volumeInUnits = Math.round(volume * 100000);
-
-    const orderResp = await session.sendMessage("ProtoOANewOrderReq", {
-      ctidTraderAccountId: Number(accountId),
-      symbolName: symbol,
-      orderType: 1, // 1 = MARKET
-      tradeSide: side === "BUY" ? 1 : 2, // 1 = BUY, 2 = SELL
-      volume: volumeInUnits,
-      comment: "SPremier test"
-    });
-
-    res.json({ ok: true, orderId: orderResp.order?.orderId?.toString() || null });
-  } catch (e) {
-    console.error("test-trade error:", e.message || e);
-    res.status(200).json({ ok: false, error: e.message || String(e), proofOfTradingAccess: true });
-  }
-});
-
-app.get("/positions", async (req, res) => {
-  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "") || req.query.token;
-  const accountId = req.query.accountId || "5313320";
-  if (!token) return res.status(401).json({ error: "Missing token" });
-
-  try {
-    const session = await getSession(token, accountId);
-    const resp = await session.sendMessage("ProtoOaReconcileReq", { ctidTraderAccountId: Number(accountId) });
-
-    const positions = resp.position.map(p => ({
-      positionId: p.positionId.toString(),
-      symbol: p.symbolName,
-      volume: Number(p.volume) / 100000,
-      side: p.tradeSide === 1 ? "BUY" : "SELL",
-      openPrice: Number(p.price) / 100000
-    }));
-
-    res.json({ data: positions });
-  } catch (e) {
-    console.error("positions error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post("/close-position", async (req, res) => {
-  const { token, accountId = "5313320", positionId, volume } = req.body;
-  if (!token || !positionId) return res.status(400).json({ error: "Missing token or positionId" });
-
-  try {
-    const session = await getSession(token, accountId);
-    await session.sendMessage("ProtoOaClosePositionReq", {
-      ctidTraderAccountId: Number(accountId),
-      positionId: positionId,
-      volume: Math.round(volume * 100000)
-    });
-    res.json({ ok: true });
-  } catch (e) {
-    console.error("close-position error:", e.message);
-    res.status(500).json({ error: e.message });
   }
 });
 
