@@ -6,7 +6,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "ctrader-open-api": "^2.8.10",
+    "ctrader-open-api": "https://github.com/spotware/ctrader-open-api/archive/refs/heads/master.tar.gz",
     "express": "^4.19.2",
     "cors": "^2.8.5"
   }
